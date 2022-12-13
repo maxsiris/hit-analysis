@@ -12,6 +12,9 @@ class Interaction:
         # Create dictionary and parse for keywords. If found, get search website domain.
         keyword_dict = keyword_df.to_dict()
 
+        keyword = None
+        search_domain = None
+
         for key, value in keyword_dict["referrer"].items():
 
             # create url object in order to parse search terms
@@ -39,8 +42,7 @@ class Interaction:
                     # Only need first valid keyword and search link  from referred list. Can break loop once found.
                     break
                 else:
-                    search_domain = None
-                    keyword = None
+                    pass
 
         return keyword, search_domain
 
