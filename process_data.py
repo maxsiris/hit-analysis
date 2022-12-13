@@ -1,9 +1,28 @@
 import pandas as pd
+import boto3
+from datetime import date
 from urllib.parse import urlparse, parse_qs
 from process_helpers import Interaction
 
 
 pd.options.mode.chained_assignment = None
+
+AWS_REGION = 'us-east-2'
+sqs_client = boto3.client("sqs", region_name=AWS_REGION)
+
+def receive_queue_message(queue_url):
+    """
+    Retrieves messages from queue
+    """
+
+    response = sqs_client.receive_message(QueueUrl=queue_url)
+    message = response.get("Messages", [])[0]
+
+    message_body = message["Body"]
+
+    s3_file_location = message_body['Records'][0]['s3']['object']['key']
+
+    return s3_file_location
 
 
 
@@ -76,12 +95,21 @@ def process_interactions(file_location):
     total_metrics_df = total_metrics_df.sort_values(by='Revenue', ascending=False)
     total_metrics_df = total_metrics_df.reset_index(drop=True)
 
-    print(total_metrics_df)
+    return total_metrics_df
 
+def write_to_file(total_metrics_df):
+    total_metrics_df.to_csv('{}_SearchKeywordPerformance.tab'.format(date.today()), sep='\t')
 
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
+    # queue_url = 'https://sqs.us-east-2.amazonaws.com/238387571194/hit-queue'
+    #
+    # file_location = receive_queue_message(queue_url)
+    # print(file_location)
 
     file_location = 'data[57][88][30].tsv'
-    process_interactions(file_location)
+
+    total_metrics_df = process_interactions(file_location)
+
+    write_to_file(total_metrics_df)
