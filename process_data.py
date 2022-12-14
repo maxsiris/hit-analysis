@@ -1,9 +1,33 @@
 import pandas as pd
+import boto3
+from datetime import date
+import json
+import time
+from io import StringIO
 from urllib.parse import urlparse, parse_qs
 from process_helpers import Interaction
 
 
 pd.options.mode.chained_assignment = None
+
+AWS_REGION = 'us-east-2'
+sqs_client = boto3.client("sqs", region_name=AWS_REGION)
+
+def receive_queue_message(queue_url):
+    """
+    Retrieves messages from queue
+    """
+
+    response = sqs_client.receive_message(QueueUrl=queue_url)
+    message = response.get("Messages", [])[0]
+
+    message_body = message["Body"]
+
+    message_body = json.loads(message_body)
+
+    s3_file_location = message_body['Records'][0]['s3']['object']['key']
+
+    return s3_file_location
 
 
 
@@ -39,7 +63,7 @@ def analyze_interaction(interaction_df):
 
 
 
-def process_interactions(file_location):
+def process_interactions(file_string):
     """
     Break up dataframe into groups based on IP address.
     Each group will be called an "interaction".
@@ -50,7 +74,7 @@ def process_interactions(file_location):
     :return: A single dataframe
     """
 
-    hit_df = pd.read_csv(file_location, sep='\t', header=0)
+    hit_df = pd.read_csv(StringIO(file_string), sep='\t', header=0)
 
     # sort entire df by time, so no need to sort on individual groups later
     hit_df.sort_values(by='hit_time_gmt', ascending=True)
@@ -76,12 +100,51 @@ def process_interactions(file_location):
     total_metrics_df = total_metrics_df.sort_values(by='Revenue', ascending=False)
     total_metrics_df = total_metrics_df.reset_index(drop=True)
 
-    print(total_metrics_df)
+    return total_metrics_df
 
+def write_to_file(total_metrics_df):
+    total_metrics_df.to_csv('{}_SearchKeywordPerformance.tab'.format(date.today()), sep='\t')
 
+    local_file = '{}_SearchKeywordPerformance.tab'.format(date.today())
+
+    return local_file
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
 
-    file_location = 'data[57][88][30].tsv'
-    process_interactions(file_location)
+    client = boto3.client('s3')
+
+    # Create infinite loop to continuously look for SQS messages on the EC2 instance.
+    #TODO: Add logic to make script fail during legitimate errors.
+    while True:
+
+        queue_url = 'https://sqs.us-east-2.amazonaws.com/238387571194/hit-queue'
+        file_location = None
+
+        try:
+
+            file_location = receive_queue_message(queue_url)
+            print(file_location)
+
+
+        except Exception as e:
+            print(e)
+            time.sleep(30)
+            print("Done sleeping. Starting up again.")
+
+        if file_location:
+            key = file_location
+            print(key)
+            file_object = client.get_object(Bucket='hit-data-bucket', Key=key)
+            body = file_object['Body']
+            file_string = body.read().decode('utf-8')
+
+            total_metrics_df = process_interactions(file_string)
+            local_file = write_to_file(total_metrics_df)
+
+            # Read file, copy to S3, then delete
+            client.upload_file(local_file, 'hit-output-bucket', local_file)
+
+
+        else:
+            pass
